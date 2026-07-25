@@ -96,7 +96,11 @@ echo "  ✅ Project ready at $DEPLOY_DIR"
 echo ""
 echo "[4/6] Creating production .env file..."
 if [ ! -f "$DEPLOY_DIR/backend/.env.production" ]; then
-    cat > "$DEPLOY_DIR/backend/.env.production" << 'ENVEOF'
+    if [ -f "$DEPLOY_DIR/backend/.env.production.example" ]; then
+        cp "$DEPLOY_DIR/backend/.env.production.example" "$DEPLOY_DIR/backend/.env.production"
+        echo "  ✅ Created from .env.production.example template"
+    else
+        cat > "$DEPLOY_DIR/backend/.env.production" << 'ENVEOF'
 # ConnectXperts NMS - Production Environment
 DEBUG=false
 JWT_SECRET_KEY=change-me-to-a-random-secret
@@ -104,6 +108,7 @@ POSTGRES_PASSWORD=change-me-to-a-strong-password
 REDIS_PASSWORD=change-me-to-a-strong-password
 CORS_ORIGINS=https://monitor.connectxperts.in
 ENVEOF
+    fi
     echo ""
     echo "  ⚠️  EDIT THE .env FILE WITH REAL SECRETS:"
     echo "     nano $DEPLOY_DIR/backend/.env.production"
