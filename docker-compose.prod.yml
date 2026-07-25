@@ -23,8 +23,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnms123}
       POSTGRES_DB: cnms_db
       PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "127.0.0.1:5432:5432"
+    # No host port mapping -- internal Docker network only (avoids conflicts with native PostgreSQL)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cnms -d cnms_db"]
       interval: 10s
@@ -47,8 +46,7 @@ services:
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cnms-redis-pass}
     volumes:
       - redis_data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
+    # No host port mapping -- internal Docker network only
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 10s
@@ -96,8 +94,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No host port mapping -- internal Docker network only
     networks:
       - cnms-network
     deploy:
@@ -174,8 +171,7 @@ services:
       dockerfile: Dockerfile
     container_name: cnms-frontend
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:80"
+    # No host port mapping -- proxied via nginx internally
     depends_on:
       - backend
     networks:
@@ -218,8 +214,7 @@ services:
     restart: unless-stopped
     volumes:
       - uptime_kuma_data:/app/data
-    ports:
-      - "127.0.0.1:3001:3001"
+    # No host port mapping -- proxied via nginx internally
     networks:
       - cnms-network
     environment:
