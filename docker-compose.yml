@@ -1,0 +1,166 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: cnms-postgres
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_USER: cnms
+      POSTGRES_PASSWORD: cnms123
+      POSTGRES_DB: cnms_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnms -d cnms_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cnms-network
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: cnms-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass cnms-redis-pass
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cnms-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cnms-backend
+    restart: unless-stopped
+    volumes:
+      - backend_data:/data
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://cnms:cnms123@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:cnms123@postgres:5432/cnms_db
+      - REDIS_URL=redis://:cnms-redis-pass@redis:6379/0
+      - CELERY_BROKER_URL=redis://:cnms-redis-pass@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:cnms-redis-pass@redis:6379/1
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-super-secret-key-change-in-production}
+      - DEBUG=${DEBUG:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - cnms-network
+
+  # Celery Worker for background tasks
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cnms-celery-worker
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=10 --max-tasks-per-child=1000
+    volumes:
+      - backend_data:/data
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://cnms:cnms123@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:cnms123@postgres:5432/cnms_db
+      - REDIS_URL=redis://:cnms-redis-pass@redis:6379/0
+      - CELERY_BROKER_URL=redis://:cnms-redis-pass@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:cnms-redis-pass@redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cnms-network
+
+  # Celery Beat for scheduled tasks
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cnms-celery-beat
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app beat --loglevel=info
+    volumes:
+      - backend_data:/data
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://cnms:cnms123@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:cnms123@postgres:5432/cnms_db
+      - REDIS_URL=redis://:cnms-redis-pass@redis:6379/0
+      - CELERY_BROKER_URL=redis://:cnms-redis-pass@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:cnms-redis-pass@redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cnms-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cnms-frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - cnms-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: cnms-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - cnms-network
+
+networks:
+  cnms-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_data:
+    driver: local

@@ -1,0 +1,54 @@
+# =============================================================================
+# ConnectXperts NMS - .gitignore
+# =============================================================================
+
+# === Environment & Secrets ===
+.env
+.env.*.local
+backend/.env
+backend/.env.*.local
+docker-compose.override.yml
+
+# === SSL / Let's Encrypt Certificates ===
+data/certbot/conf/
+data/certbot/www/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.eggs/
+dist/
+*_egg/
+
+# === Node / Frontend ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# === IDE & Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === Docker ===
+nginx/logs/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+nul
+
+# === Logs ===
+*.log

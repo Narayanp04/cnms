@@ -1,0 +1,264 @@
+# =============================================================================
+# ConnectXperts NMS - Production Docker Compose
+# Domain: monitor.connectxperts.in
+# =============================================================================
+# Usage:
+#   1. First run (initial certificate request):
+#      docker compose -f docker-compose.prod.yml run --rm certbot-init
+#   2. Then start everything:
+#      docker compose -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: cnms-postgres
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_USER: cnms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnms123}
+      POSTGRES_DB: cnms_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnms -d cnms_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: cnms-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cnms-redis-pass}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: cnms-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - backend_data:/data
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required — run: python -c \"import secrets; print(f'JWT_SECRET_KEY={secrets.token_hex(32)}')\"}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://monitor.connectxperts.in}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-alerts@cnms.local}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: cnms-celery-worker
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app worker --loglevel=warning --concurrency=10 --max-tasks-per-child=1000
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - backend_data:/data
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Celery Beat
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: cnms-celery-beat
+    restart: unless-stopped
+    command: celery -A celery_worker.celery_app beat --loglevel=warning
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - backend_data:/data
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cnms:${POSTGRES_PASSWORD:-cnms123}@postgres:5432/cnms_db
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cnms-network
+
+  # React Frontend (served via Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cnms-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - backend
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Nginx Reverse Proxy (SSL Termination)
+  nginx:
+    image: nginx:alpine
+    container_name: cnms-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/certbot/www:/var/www/certbot:ro
+      - ./data/certbot/conf:/etc/letsencrypt:ro
+      - ./nginx/logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - cnms-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  # Uptime Kuma — Website & Service Monitoring
+  # Dashboard: https://status.connectxperts.in
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: cnms-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime_kuma_data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - cnms-network
+    environment:
+      - TZ=Asia/Kolkata
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Certbot (Let's Encrypt Certificate Manager)
+  # Runs in background and auto-renews certificates every 12 hours
+  certbot:
+    image: certbot/certbot
+    container_name: cnms-certbot
+    restart: unless-stopped
+    volumes:
+      - ./data/certbot/www:/var/www/certbot
+      - ./data/certbot/conf:/etc/letsencrypt
+    entrypoint: >
+      /bin/sh -c "
+        trap exit TERM;
+        while :; do
+          certbot renew --webroot -w /var/www/certbot --quiet || true;
+          sleep 12h & wait $$!;
+        done
+      "
+
+networks:
+  cnms-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_data:
+    driver: local
+  uptime_kuma_data:
+    driver: local

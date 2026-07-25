@@ -1,0 +1,14 @@
+from app.api.auth import router as auth_router
+from app.api.devices import router as devices_router
+from app.api.dashboard import router as dashboard_router
+from app.api.monitoring import router as monitoring_router
+from app.api.alerts import router as alerts_router
+from app.api.reports import router as reports_router
+from app.api.sla import router as sla_router
+from app.api.events import router as events_router
+from app.api.ai import router as ai_router
+from app.api.customers import router as customers_router
+from app.api.settings import router as settings_router
+from app.api.backup import router as backup_router
+from app.api.notifications import router as notifications_router
+from app.api.maps import router as maps_router
