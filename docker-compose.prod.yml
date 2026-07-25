@@ -79,8 +79,8 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/0
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-cnms-redis-pass}@redis:6379/1
-      - "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required - generate with: python3 -c 'import secrets; print(secrets.token_hex(32))'}"
-      - CORS_ORIGINS=${CORS_ORIGINS:-https://monitor.connectxperts.in}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://monitor.connectxperts.in}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
